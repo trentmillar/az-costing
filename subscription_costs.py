@@ -116,23 +116,45 @@ def create_cost_visualizations(wb, monthly_costs):
     subscription_names = {sub['id']: sub['name'] for sub in get_subscriptions()}
     sub_costs_by_month = {sub_id: [] for sub_id in subscription_names}
     
+    # Calculate total cost for each subscription across all months
+    sub_total_costs = {}
+    for sub_id in subscription_names:
+        total_cost = sum(
+            monthly_costs[period].get(sub_id, {}).get(service_family, 0)
+            for period in periods
+            for service_family in monthly_costs[period].get(sub_id, {})
+        )
+        sub_total_costs[sub_id] = total_cost
+    
+    # Get top 50 subscriptions by cost
+    top_subs = dict(sorted(sub_total_costs.items(), key=lambda x: x[1], reverse=True)[:25])
+    
+    # Calculate costs by month for top subscriptions and group others
+    sub_costs_by_month = {sub_id: [] for sub_id in top_subs}
+    other_costs_by_month = []
+    
     for period in periods:
-        for sub_id in subscription_names:
+        # Calculate costs for top subscriptions
+        for sub_id in top_subs:
             total = sum(
-                service_costs  # Changed: service_costs is already a float
+                service_costs
                 for service_family, service_costs in monthly_costs[period].get(sub_id, {}).items()
             )
             sub_costs_by_month[sub_id].append(total)
+        
+        # Calculate combined costs for other subscriptions
+        other_total = sum(
+            service_costs
+            for sub_id, sub_data in monthly_costs[period].items()
+            for service_family, service_costs in sub_data.items()
+            if sub_id not in top_subs
+        )
+        other_costs_by_month.append(other_total)
     
-    # 3. Service distribution for latest month (pie chart)
-    latest_period = periods[-1]
-    service_totals = {}
-    for sub_costs in monthly_costs[latest_period].values():
-        for service_family, cost in sub_costs.items():
-            # Changed: cost is already a float, no need for .values() or sum()
-            service_totals[service_family] = service_totals.get(service_family, 0) + cost
+    # Add "Others" to the visualization
+    sub_costs_by_month['Others'] = other_costs_by_month
     
-    # Create subplot figure
+    # Create subplot figure first
     fig = make_subplots(
         rows=2, cols=2,
         specs=[[{"type": "scatter"}, {"type": "bar"}],
@@ -156,23 +178,40 @@ def create_cost_visualizations(wb, monthly_costs):
         row=1, col=1
     )
     
-    # 2. Stacked bar chart - Costs by subscription
+    # 2. Stacked bar chart - Costs by subscription (top 10 + Others)
     for sub_id, costs in sub_costs_by_month.items():
+        name = subscription_names.get(sub_id, 'Others')  # Use 'Others' for the aggregated data
         fig.add_trace(
             go.Bar(
                 x=period_labels,
                 y=costs,
-                name=subscription_names[sub_id]
+                name=name if len(name) <= 30 else name[:27] + '...'  # Truncate long names
             ),
             row=1, col=2
         )
     
-    # 3. Pie chart - Service distribution
+    # 3. Service distribution for latest month (pie chart)
+    latest_period = periods[-1]
+    service_totals = {}
+    for sub_costs in monthly_costs[latest_period].values():
+        for service_family, cost in sub_costs.items():
+            service_totals[service_family] = service_totals.get(service_family, 0) + cost
+    
+    # Sort services by cost and get top 10
+    top_services = dict(sorted(service_totals.items(), key=lambda x: x[1], reverse=True)[:10])
+    other_services = sum(cost for service, cost in service_totals.items() if service not in top_services)
+    
+    # Add "Others" category
+    if other_services > 0:
+        top_services['Others'] = other_services
+    
     fig.add_trace(
         go.Pie(
-            labels=list(service_totals.keys()),
-            values=list(service_totals.values()),
-            hole=0.3
+            labels=list(top_services.keys()),
+            values=list(top_services.values()),
+            hole=0.3,
+            textinfo='label+percent',
+            showlegend=False
         ),
         row=2, col=1
     )
@@ -243,6 +282,10 @@ def create_excel_report(start_period=None, end_period=None):
     
     # Create workbook
     wb = openpyxl.Workbook()
+    
+    # Remove the default sheet
+    default_sheet = wb['Sheet']
+    wb.remove(default_sheet)
     
     # Store monthly costs for comparison
     monthly_costs = {}  # Format: {(year, month): {sub_id: {service_family: cost}}}
