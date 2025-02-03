@@ -11,6 +11,10 @@ from time import sleep
 from azure.core.exceptions import HttpResponseError
 import random
 import requests
+from plotly import graph_objects as go
+from plotly.subplots import make_subplots
+import io
+from openpyxl.drawing.image import Image
 
 def get_subscriptions():
     """Get all subscriptions in the tenant"""
@@ -88,6 +92,125 @@ def get_costs_by_resource_type(subscription_id, start_date, end_date, max_retrie
                 sleep(wait_time)
                 continue
             raise
+
+def create_cost_visualizations(wb, monthly_costs):
+    """Create visualization sheet with cost analysis charts"""
+    # Create a new sheet for visualizations
+    viz_sheet = wb.create_sheet("Visualizations", 0)  # Put it first
+    
+    # Prepare data for plotting
+    periods = sorted(monthly_costs.keys())
+    period_labels = [f"{calendar.month_name[m]} {y}" for y, m in periods]
+    
+    # 1. Total costs per month (line chart)
+    total_costs_by_month = []
+    for period in periods:
+        total = sum(
+            service_costs  # Changed: service_costs is already a float
+            for sub_costs in monthly_costs[period].values()
+            for service_costs in sub_costs.values()
+        )
+        total_costs_by_month.append(total)
+    
+    # 2. Costs by subscription (stacked bar chart)
+    subscription_names = {sub['id']: sub['name'] for sub in get_subscriptions()}
+    sub_costs_by_month = {sub_id: [] for sub_id in subscription_names}
+    
+    for period in periods:
+        for sub_id in subscription_names:
+            total = sum(
+                service_costs  # Changed: service_costs is already a float
+                for service_family, service_costs in monthly_costs[period].get(sub_id, {}).items()
+            )
+            sub_costs_by_month[sub_id].append(total)
+    
+    # 3. Service distribution for latest month (pie chart)
+    latest_period = periods[-1]
+    service_totals = {}
+    for sub_costs in monthly_costs[latest_period].values():
+        for service_family, cost in sub_costs.items():
+            # Changed: cost is already a float, no need for .values() or sum()
+            service_totals[service_family] = service_totals.get(service_family, 0) + cost
+    
+    # Create subplot figure
+    fig = make_subplots(
+        rows=2, cols=2,
+        specs=[[{"type": "scatter"}, {"type": "bar"}],
+               [{"type": "pie"}, {"type": "scatter"}]],
+        subplot_titles=(
+            "Monthly Total Costs Trend",
+            "Monthly Costs by Subscription",
+            f"Service Distribution ({period_labels[-1]})",
+            "Cost Growth Rate"
+        )
+    )
+    
+    # 1. Line chart - Total costs trend
+    fig.add_trace(
+        go.Scatter(
+            x=period_labels,
+            y=total_costs_by_month,
+            mode='lines+markers',
+            name='Total Cost'
+        ),
+        row=1, col=1
+    )
+    
+    # 2. Stacked bar chart - Costs by subscription
+    for sub_id, costs in sub_costs_by_month.items():
+        fig.add_trace(
+            go.Bar(
+                x=period_labels,
+                y=costs,
+                name=subscription_names[sub_id]
+            ),
+            row=1, col=2
+        )
+    
+    # 3. Pie chart - Service distribution
+    fig.add_trace(
+        go.Pie(
+            labels=list(service_totals.keys()),
+            values=list(service_totals.values()),
+            hole=0.3
+        ),
+        row=2, col=1
+    )
+    
+    # 4. Growth rate chart
+    growth_rates = [
+        ((total_costs_by_month[i] - total_costs_by_month[i-1]) / total_costs_by_month[i-1] * 100)
+        if total_costs_by_month[i-1] != 0 else 0
+        for i in range(1, len(total_costs_by_month))
+    ]
+    
+    fig.add_trace(
+        go.Scatter(
+            x=period_labels[1:],
+            y=growth_rates,
+            mode='lines+markers',
+            name='Growth Rate (%)'
+        ),
+        row=2, col=2
+    )
+    
+    # Update layout
+    fig.update_layout(
+        height=800,
+        showlegend=True,
+        title_text="Azure Cost Analysis"
+    )
+    
+    # Save plot as image and embed in Excel
+    img_bytes = fig.to_image(format="png", width=1200, height=800)
+    img = Image(io.BytesIO(img_bytes))
+    
+    # Add image to sheet
+    viz_sheet.add_image(img, 'A1')
+    
+    # Adjust column widths and row heights to fit the image
+    viz_sheet.column_dimensions['A'].width = 120
+    viz_sheet.row_dimensions[1].height = 600
 
 def create_excel_report(start_period=None, end_period=None):
     """
@@ -329,13 +452,16 @@ def create_excel_report(start_period=None, end_period=None):
         adjusted_width = (max_length + 2)
         summary_sheet.column_dimensions[column[0].column_letter].width = adjusted_width
 
-    # Save with new filename
+    # Add visualizations before saving
+    create_cost_visualizations(wb, monthly_costs)
+    
+    # Save workbook
     wb.save(filename)
     print(f"Report saved as {filename}")
 
 if __name__ == "__main__":
     create_excel_report(
-        start_period={'year': 2024, 'month': 12},  # December 2024
+        start_period={'year': 2025, 'month': 2},  # December 2024
         end_period={'year': 2025, 'month': 2}      # February 2025
     ) 
     
