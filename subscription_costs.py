@@ -256,8 +256,8 @@ def create_excel_report(start_period=None, end_period=None):
         previous_month_name = calendar.month_name[month]
         
         for sub in get_subscriptions():
-            prev_costs = monthly_costs.get(month, {}).get(sub['id'], {})
-            curr_costs = monthly_costs.get(current_month, {}).get(sub['id'], {})
+            prev_costs = monthly_costs.get((year, month), {}).get(sub['id'], {})
+            curr_costs = monthly_costs.get((year, current_month), {}).get(sub['id'], {})
             
             print(f"\nAnalyzing changes for {sub['name']}")
             print(f"Previous month ({previous_month_name}) costs: {prev_costs}")
