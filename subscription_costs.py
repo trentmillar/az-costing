@@ -24,7 +24,7 @@ def get_subscriptions():
                 'id': sub.subscription_id,
                 'name': sub.display_name
             })
-    return subscriptions
+    return subscriptions[0:5]
 
 def get_costs_by_resource_type(subscription_id, start_date, end_date, max_retries=3):
     """Get costs grouped by resource type for a subscription in a date range"""
@@ -137,13 +137,13 @@ def create_excel_report(start_period=None, end_period=None):
         sheet['A1'].font = Font(bold=True)
         
         # Get start and end dates for the month
-        start_date = datetime(year, month, 1)
-        end_date = start_date + relativedelta(months=1) - timedelta(days=1)
+        start_date_month = datetime(year, month, 1)
+        end_date_month = start_date_month + relativedelta(months=1) - timedelta(days=1)
         
         # Format dates for Azure API
         date_format = '%Y-%m-%d'
-        start_date_str = start_date.strftime(date_format)
-        end_date_str = end_date.strftime(date_format)
+        start_date_str = start_date_month.strftime(date_format)
+        end_date_str = end_date_month.strftime(date_format)
         
         # Get unique resource types across all subscriptions for the month
         all_resource_types = set()
@@ -249,19 +249,24 @@ def create_excel_report(start_period=None, end_period=None):
     print("\nCalculating cost changes...")
     row = 2
     
-    # After processing all months, calculate significant changes
-    for month in range(11, 12):  # Compare November to December
-        current_month = month + 1
-        current_month_name = calendar.month_name[current_month]
-        previous_month_name = calendar.month_name[month]
+    # Get sorted list of (year, month) tuples from monthly_costs
+    periods = sorted(monthly_costs.keys())
+    
+    # Compare each consecutive pair of months
+    for i in range(len(periods) - 1):
+        prev_year, prev_month = periods[i]
+        curr_year, curr_month = periods[i + 1]
+        
+        prev_month_name = calendar.month_name[prev_month]
+        curr_month_name = calendar.month_name[curr_month]
         
         for sub in get_subscriptions():
-            prev_costs = monthly_costs.get((year, month), {}).get(sub['id'], {})
-            curr_costs = monthly_costs.get((year, current_month), {}).get(sub['id'], {})
+            prev_costs = monthly_costs.get((prev_year, prev_month), {}).get(sub['id'], {})
+            curr_costs = monthly_costs.get((curr_year, curr_month), {}).get(sub['id'], {})
             
             print(f"\nAnalyzing changes for {sub['name']}")
-            print(f"Previous month ({previous_month_name}) costs: {prev_costs}")
-            print(f"Current month ({current_month_name}) costs: {curr_costs}")
+            print(f"Previous month ({prev_month_name} {prev_year}) costs: {prev_costs}")
+            print(f"Current month ({curr_month_name} {curr_year}) costs: {curr_costs}")
             
             # Compare service families
             all_services = set(prev_costs.keys()) | set(curr_costs.keys())
@@ -292,7 +297,7 @@ def create_excel_report(start_period=None, end_period=None):
                     summary_sheet[f'D{row}'] = curr_cost
                     summary_sheet[f'E{row}'] = change_amount
                     summary_sheet[f'F{row}'] = f"{change_percentage:.1f}%"
-                    summary_sheet[f'G{row}'] = f"{previous_month_name} → {current_month_name}"
+                    summary_sheet[f'G{row}'] = f"{prev_month_name} {prev_year} → {curr_month_name} {curr_year}"
                     
                     # Apply conditional formatting
                     if change_amount > 0:
@@ -320,10 +325,13 @@ def create_excel_report(start_period=None, end_period=None):
         summary_sheet.column_dimensions[column[0].column_letter].width = adjusted_width
 
     # Save the workbook
-    output_file = f'subscription_costs_{year}.xlsx'
+    output_file = f'subscription_costs_{end_period["year"]}.xlsx'
     wb.save(output_file)
     print(f"Report saved as {output_file}")
 
 if __name__ == "__main__":
-    create_excel_report(2024) 
+    create_excel_report(
+        start_period={'year': 2024, 'month': 12},  # Dec 2024
+        end_period={'year': 2025, 'month': 2}      # Feb 2025
+    ) 
     
