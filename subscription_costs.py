@@ -113,7 +113,12 @@ def create_excel_report(start_period=None, end_period=None):
     print(f"Generating cost report from {calendar.month_name[start_period['month']]} {start_period['year']} "
           f"to {calendar.month_name[end_period['month']]} {end_period['year']}")
     
-    # Create Excel workbook
+    # Create filename with start and end periods
+    start_str = f"{start_period['year']}-{start_period['month']:02d}"
+    end_str = f"{end_period['year']}-{end_period['month']:02d}"
+    filename = f'azure_costs_{start_str}_to_{end_str}.xlsx'
+    
+    # Create workbook
     wb = openpyxl.Workbook()
     
     # Store monthly costs for comparison
@@ -324,14 +329,13 @@ def create_excel_report(start_period=None, end_period=None):
         adjusted_width = (max_length + 2)
         summary_sheet.column_dimensions[column[0].column_letter].width = adjusted_width
 
-    # Save the workbook
-    output_file = f'subscription_costs_{end_period["year"]}.xlsx'
-    wb.save(output_file)
-    print(f"Report saved as {output_file}")
+    # Save with new filename
+    wb.save(filename)
+    print(f"Report saved as {filename}")
 
 if __name__ == "__main__":
     create_excel_report(
-        start_period={'year': 2024, 'month': 12},  # Dec 2024
-        end_period={'year': 2025, 'month': 2}      # Feb 2025
+        start_period={'year': 2024, 'month': 12},  # December 2024
+        end_period={'year': 2025, 'month': 2}      # February 2025
     ) 
     
